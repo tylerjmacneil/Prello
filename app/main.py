@@ -47,28 +47,19 @@ def health():
 
 
 
+
 @app.get("/me", tags=["auth"])
-def me(
-	credentials: HTTPAuthorizationCredentials = Security(bearer_scheme),
-	sb: Client = Depends(get_supabase)
-):
+async def me(credentials: HTTPAuthorizationCredentials = Security(bearer_scheme)):
 	token = credentials.credentials
 	try:
-		# Decode without verification just to read claims
 		payload = jwt.decode(token, options={"verify_signature": False})
 		user_id = payload.get("sub")
 		email = payload.get("email")
 	except Exception:
 		raise HTTPException(status_code=401, detail="Invalid JWT")
-
 	if not user_id:
 		raise HTTPException(status_code=401, detail="Missing user info in token")
-
 	return {"id": user_id, "email": email}
-
-@app.get("/me2", tags=["auth"])
-async def me2(user = Depends(get_user)):
-	return {"user_id": user["id"], "email": user.get("email", "")}
 
 
 from .clients import router as clients_router
