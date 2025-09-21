@@ -2,12 +2,13 @@ import stripe
 from fastapi import APIRouter, Request, HTTPException
 from .deps import get_sb
 from .config import settings
+from .rate_limit import rate_limiter
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 @router.post("/webhook")
-async def payments_webhook(req: Request):
+async def payments_webhook(req: Request, _: Request = Depends(rate_limiter)):
     sb = get_sb()
     payload = await req.body()
     sig = req.headers.get("stripe-signature")

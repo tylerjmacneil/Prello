@@ -8,6 +8,7 @@ import jwt
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .deps import get_user
+from .rate_limit import rate_limiter
 import jwt
 
 
@@ -48,8 +49,9 @@ def health():
 
 
 
+
 @app.get("/me", tags=["auth"])
-async def me(credentials: HTTPAuthorizationCredentials = Security(bearer_scheme)):
+async def me(credentials: HTTPAuthorizationCredentials = Security(bearer_scheme), request=Depends(rate_limiter)):
 	token = credentials.credentials
 	try:
 		payload = jwt.decode(token, options={"verify_signature": False})
