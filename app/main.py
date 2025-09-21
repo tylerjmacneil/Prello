@@ -19,9 +19,14 @@ app.add_middleware(
 def root():
 	return {"name": "prello-api"}
 
+
 @app.get("/health")
 def health():
-	return {"ok": True}
+	from .config import settings
+	return {
+		"ok": True,
+		"supabase_configured": bool((settings.SUPABASE_URL or "").strip() and (settings.SUPABASE_SERVICE_ROLE_KEY or "").strip())
+	}
 
 
 @app.get("/me")
