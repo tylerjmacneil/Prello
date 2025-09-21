@@ -18,8 +18,14 @@ async def list_jobs(status: str | None = Query(default=None), user_id: str = Dep
 @router.post("")
 async def create_job(payload: JobIn, user_id: str = Depends(get_current_user_id)):
     sb = get_sb()
-    c = sb.table("clients").select("id,user_id").eq("id", payload.client_id).single().execute()
-    if not c.data or c.data["user_id"] != user_id:
-        raise HTTPException(status_code=400, detail="Client not found or not yours")
-    r = sb.table("jobs").insert({"user_id": user_id, **payload.model_dump()}).select("*").execute()
-    return r.data[0]
+    client = sb.table("clients").select("id").eq("id", payload.client_id).eq("user_id", user_id).single().execute()
+    if not client.data:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    res = sb.table("jobs").insert(
+        {"user_id": user_id, **payload.model_dump()},
+        returning="representation",
+    ).execute()
+    if res.data and len(res.data) == 1:
+        return res.data[0]
+    raise HTTPException(status_code=500, detail="Insert failed")
