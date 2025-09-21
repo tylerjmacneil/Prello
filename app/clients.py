@@ -1,17 +1,20 @@
+
 from fastapi import APIRouter, Depends
-from .deps import get_sb, get_user
+from .deps import get_sb, get_current_user_id
 from .models import ClientIn
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
+
 @router.get("")
-async def list_clients(user = Depends(get_user)):
+async def list_clients(user_id: str = Depends(get_current_user_id)):
     sb = get_sb()
-    r = sb.table("clients").select("*").eq("user_id", user["id"]).order("created_at", desc=True).execute()
+    r = sb.table("clients").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
     return r.data
 
+
 @router.post("")
-async def create_client(payload: ClientIn, user = Depends(get_user)):
+async def create_client(payload: ClientIn, user_id: str = Depends(get_current_user_id)):
     sb = get_sb()
-    r = sb.table("clients").insert({"user_id": user["id"], **payload.model_dump()}).select("*").execute()
+    r = sb.table("clients").insert({"user_id": user_id, **payload.model_dump()}).select("*").execute()
     return r.data[0]

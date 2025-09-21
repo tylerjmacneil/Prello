@@ -1,8 +1,24 @@
+
 from functools import lru_cache
 from typing import Dict, Any
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from supabase import create_client, Client
 from .config import settings
+import jwt
+
+bearer_scheme = HTTPBearer(auto_error=True)
+
+def get_current_user_id(creds: HTTPAuthorizationCredentials = Security(bearer_scheme)) -> str:
+    token = creds.credentials
+    try:
+        payload = jwt.decode(token, options={"verify_signature": False})
+        user_id = payload.get("sub")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid JWT")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing user info in token")
+    return user_id
 
 @lru_cache
 def get_sb() -> Client:
