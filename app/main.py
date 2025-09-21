@@ -23,6 +23,12 @@ def root():
 def health():
 	return {"ok": True}
 
+
 @app.get("/me")
 async def me(user = Depends(get_user)):
 	return {"user_id": user["id"]}
+
+from .clients import router as clients_router
+from .jobs import router as jobs_router
+app.include_router(clients_router)
+app.include_router(jobs_router)
