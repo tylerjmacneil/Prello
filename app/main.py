@@ -1,11 +1,14 @@
 
 
-from fastapi import FastAPI, Depends, Header, HTTPException
+from fastapi import FastAPI, Depends, Header, HTTPException, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .deps import get_user
 import jwt
 
+
+bearer = HTTPBearer(auto_error=True)
 app = FastAPI(title="Prello API", version="1.0.0")
 
 app.add_middleware(
@@ -32,11 +35,15 @@ def health():
 
 
 
-@app.get("/me")
-def me(authorization: str = Header(...)):
-	if not authorization.lower().startswith("bearer "):
-		raise HTTPException(status_code=401, detail="Missing bearer token")
-	return {"received_auth": True}
+
+@app.get("/me", tags=["auth"])
+async def me(creds: HTTPAuthorizationCredentials = Security(bearer)):
+	token = creds.credentials
+	return {"has_token": bool(token)}
+
+@app.get("/me2", tags=["auth"])
+async def me2(user = Depends(get_user)):
+	return {"user_id": user["id"], "email": user.get("email", "")}
 
 
 from .clients import router as clients_router
