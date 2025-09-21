@@ -4,6 +4,7 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .deps import get_user
+import jwt
 
 app = FastAPI(title="Prello API", version="1.0.0")
 
@@ -29,9 +30,22 @@ def health():
 	}
 
 
+
 @app.get("/me")
-async def me(user = Depends(get_user)):
-	return {"user_id": user["id"]}
+def me(authorization: str = Header(...)):
+	from .config import settings
+	if not authorization.lower().startswith("bearer "):
+		raise HTTPException(status_code=401, detail="Missing bearer token")
+	token = authorization.split(" ", 1)[1]
+	try:
+		payload = jwt.decode(token, settings.SUPABASE_ANON_KEY, algorithms=["HS256"])
+		user_id = payload.get("sub")
+		email = payload.get("email")
+		if not user_id:
+			raise HTTPException(status_code=401, detail="Invalid token payload")
+		return {"user_id": user_id, "email": email}
+	except Exception as e:
+		raise HTTPException(status_code=401, detail=f"Token verification failed: {e}")
 
 
 from .clients import router as clients_router
