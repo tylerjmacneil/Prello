@@ -13,10 +13,17 @@ async def payments_webhook(
 ):
     payload = await req.body()
     sig = req.headers.get("stripe-signature", "")
-    try:
-        event = verify_stripe_signature(payload, sig)
-    except HTTPException as e:
-        raise e
+    event = verify_stripe_signature(payload, sig)
+
+    # handle a couple of common events
+    t = event["type"]
+    data = event["data"]["object"]
+    if t == "checkout.session.completed":
+        # TODO: mark job as paid using data["id"] / metadata
+        pass
+    elif t == "payment_intent.succeeded":
+        # TODO: update payment status
+        pass
 
     # handle events...
     return {"ok": True}
