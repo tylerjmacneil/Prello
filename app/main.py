@@ -28,7 +28,12 @@ def health():
 async def me(user = Depends(get_user)):
 	return {"user_id": user["id"]}
 
+
 from .clients import router as clients_router
 from .jobs import router as jobs_router
+from .payments import router as payments_router
+from .stripe_webhook import router as stripe_router
 app.include_router(clients_router)
 app.include_router(jobs_router)
+app.include_router(payments_router)
+app.include_router(stripe_router)
