@@ -1,6 +1,6 @@
 import stripe
 from fastapi import APIRouter, Request, HTTPException
-from .deps import sb
+from .deps import get_sb
 from .config import settings
 
 router = APIRouter(prefix="/stripe", tags=["stripe"])
@@ -8,6 +8,7 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 
 @router.post("/webhook")
 async def webhook(req: Request):
+    sb = get_sb()
     payload = await req.body()
     sig = req.headers.get("stripe-signature")
     try:

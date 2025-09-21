@@ -1,6 +1,6 @@
 import stripe
 from fastapi import APIRouter, Depends, HTTPException
-from .deps import sb, get_user
+from .deps import get_sb, get_user
 from .config import settings
 
 router = APIRouter(prefix="/jobs", tags=["payments"])
@@ -8,6 +8,7 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 
 @router.post("/{job_id}/checkout")
 async def create_checkout(job_id: str, user = Depends(get_user)):
+    sb = get_sb()
     job = sb.table("jobs").select("*").eq("id", job_id).single().execute().data
     if not job or job["user_id"] != user["id"]:
         raise HTTPException(status_code=404, detail="Job not found")
