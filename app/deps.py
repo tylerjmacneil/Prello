@@ -1,31 +1,27 @@
 import os
+from fastapi import Header, HTTPException
+from typing import Dict, Any
 from supabase import create_client, Client
-from fastapi import Depends, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from dotenv import load_dotenv
+from .config import settings
 
-load_dotenv()
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-security = HTTPBearer()
+sb: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
 
-async def get_user(authorization: str = Depends(security)):
-    if not authorization or not authorization.credentials:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    token = authorization.credentials
-    user_resp = sb.auth.get_user(token)
-    if not user_resp or not user_resp.user:
+async def get_user(authorization: str = Header(...)) -> Dict[str, Any]:
+    if not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = authorization.split(" ", 1)[1]
+    u = sb.auth.get_user(token)
+    if not u or not u.user:
         raise HTTPException(status_code=401, detail="Invalid token")
-    user = user_resp.user
-    auth_user_id = user.id
-    email = user.email
-    # Check if user exists in public.users
-    users = sb.table("users").select("*").eq("auth_user_id", auth_user_id).execute()
-    if not users.data:
-        # Insert new user
-        insert_resp = sb.table("users").insert({"auth_user_id": auth_user_id, "email": email}).execute()
-        user_row = insert_resp.data[0]
+
+    auth_user_id = u.user.id
+    email = u.user.email or ""
+
+    # ensure users row exists
+    row = sb.table("users").select("*").eq("auth_user_id", auth_user_id).single().execute()
+    if not row.data:
+        created = sb.table("users").insert({"auth_user_id": auth_user_id, "email": email}).execute()
+        data = created.data[0]
     else:
-        user_row = users.data[0]
-    return user_row
+        data = row.data
+    return data  # includes users.id

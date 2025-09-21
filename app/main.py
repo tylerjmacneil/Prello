@@ -1,7 +1,9 @@
 
-from fastapi import FastAPI
+
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
+from .deps import get_user
 
 app = FastAPI(title="Prello API", version="1.0.0")
 
@@ -20,3 +22,7 @@ def root():
 @app.get("/health")
 def health():
 	return {"ok": True}
+
+@app.get("/me")
+async def me(user = Depends(get_user)):
+	return {"user_id": user["id"]}
