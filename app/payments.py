@@ -41,6 +41,9 @@ async def create_checkout(job_id: str,
             "quantity": 1,
         }],
         metadata={"job_id": job_id, "user_id": user_id},
+        payment_intent_data={
+            "metadata": {"job_id": job_id, "user_id": user_id}
+        },
     )
 
     return {"url": session.url}

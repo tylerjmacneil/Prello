@@ -1,29 +1,40 @@
 
 from fastapi import APIRouter, Request, HTTPException, Depends
-from .utils import verify_stripe_signature, rate_limiter
+import stripe
+from .config import settings
+from .deps import get_sb
+from postgrest.exceptions import APIError
 
 
-router = APIRouter(prefix="/payments", tags=["payments"])
+router = APIRouter(tags=["payments"])
 
 
-@router.post("/webhook")
-async def payments_webhook(
-    req: Request,
-    _=Depends(rate_limiter),
-):
-    payload = await req.body()
+@router.post("/payments/webhook")
+async def payments_webhook(req: Request, sb = Depends(get_sb)):
     sig = req.headers.get("stripe-signature", "")
-    event = verify_stripe_signature(payload, sig)
+    payload = await req.body()
 
-    # handle a couple of common events
-    t = event["type"]
-    data = event["data"]["object"]
-    if t == "checkout.session.completed":
-        # TODO: mark job as paid using data["id"] / metadata
-        pass
-    elif t == "payment_intent.succeeded":
-        # TODO: update payment status
-        pass
+    try:
+        event = stripe.Webhook.construct_event(
+            payload=payload,
+            sig_header=sig,
+            secret=settings.STRIPE_WEBHOOK_SECRET,
+        )
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # handle events...
+    # Handle successful checkout
+    if event["type"] == "checkout.session.completed":
+        cs = event["data"]["object"]
+        job_id = (cs.get("metadata") or {}).get("job_id")
+        if job_id:
+            try:
+                # keep it conservative: just set paid_at timestamp
+                res = sb.table("jobs").update({"paid_at": "now()"}).eq("id", job_id).execute()
+                # (optional) if your status enum allows 'scheduled' or 'paid', you can also set it:
+                # sb.table("jobs").update({"status": "scheduled", "paid_at": "now()"}).eq("id", job_id).execute()
+            except APIError as e:
+                # Log only; don’t fail the webhook (Stripe will retry on 4xx/5xx)
+                print("Webhook update failed:", getattr(e, "message", str(e)))
+
     return {"ok": True}
