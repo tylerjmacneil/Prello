@@ -9,11 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .deps import get_user
 from .rate_limit import rate_limiter
+from .payments import router as payments_router
 import jwt
 
 
 bearer_scheme = HTTPBearer()
 app = FastAPI(title="Prello API", version="1.0.0")
+app.include_router(payments_router)
 
 def get_supabase() -> Client:
 	url = os.environ.get("SUPABASE_URL")

@@ -1,37 +1,46 @@
 import stripe
-from fastapi import APIRouter, Depends, HTTPException
-from .deps import get_sb, get_current_user_id
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+import stripe
+
+from .deps import get_current_user_id, get_sb
 from .config import settings
 
 router = APIRouter(prefix="/jobs", tags=["payments"])
-stripe.api_key = settings.STRIPE_SECRET_KEY
 
+class CheckoutSessionResp(BaseModel):
+    url: str
 
-@router.post("/{job_id}/checkout")
-async def create_checkout(job_id: str, user_id: str = Depends(get_current_user_id)):
-    sb = get_sb()
-    job = sb.table("jobs").select("*").eq("id", job_id).single().execute().data
-    if not job or job["user_id"] != user_id:
-        raise HTTPException(status_code=404, detail="Job not found or not yours")
+@router.post("/{job_id}/checkout", response_model=CheckoutSessionResp)
+async def create_checkout(job_id: str,
+                          user_id: str = Depends(get_current_user_id),
+                          sb = Depends(get_sb)):
+    # 1) Load the job you own
+    job_res = sb.table("jobs").select("*").eq("id", job_id).eq("user_id", user_id).single().execute()
+    job = job_res.data
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
 
-    total = job.get("total") or job.get("price_cents")
-    if not total:
-        raise HTTPException(status_code=400, detail="Job missing total/price_cents")
+    # (optional) only allow payment for certain statuses
+    if job["status"] not in ("active", "scheduled"):
+        raise HTTPException(status_code=400, detail="Only active/scheduled jobs can be paid")
 
-    sess = stripe.checkout.Session.create(
+    # 2) Create a Checkout Session
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    session = stripe.checkout.Session.create(
         mode="payment",
-        currency=settings.STRIPE_CURRENCY,
+        success_url=f"{settings.SUCCESS_URL}?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=settings.CANCEL_URL,
         line_items=[{
             "price_data": {
-                "currency": settings.STRIPE_CURRENCY,
-                "product_data": {"name": job["title"]},
-                "unit_amount": total,
+                "currency": "usd",
+                "product_data": {"name": job["title"] or "Service"},
+                "unit_amount": int(job["price_cents"]),
             },
             "quantity": 1,
         }],
-        success_url=settings.SUCCESS_URL,
-        cancel_url=settings.CANCEL_URL,
-        automatic_payment_methods={"enabled": True}
+        metadata={"job_id": job_id, "user_id": user_id},
     )
-    sb.table("jobs").update({"checkout_session_id": sess.id}).eq("id", job_id).execute()
-    return {"checkout_url": sess.url}
+
+    return {"url": session.url}

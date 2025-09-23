@@ -1,5 +1,6 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from postgrest.exceptions import APIError
 from .deps import get_sb, get_current_user_id
 from .models import JobIn
 
@@ -18,14 +19,22 @@ async def list_jobs(status: str | None = Query(default=None), user_id: str = Dep
 @router.post("")
 async def create_job(payload: JobIn, user_id: str = Depends(get_current_user_id)):
     sb = get_sb()
-    client = sb.table("clients").select("id").eq("id", payload.client_id).eq("user_id", user_id).single().execute()
-    if not client.data:
-        raise HTTPException(status_code=404, detail="Client not found")
+    try:
+        client = sb.table("clients")\
+            .select("id")\
+            .eq("id", payload.client_id)\
+            .eq("user_id", user_id)\
+            .single()\
+            .execute()
+    except APIError as e:
+        # PGRST116 = 0 rows with .single()
+        if getattr(e, "code", None) == "PGRST116" or "0 rows" in str(e).lower():
+            raise HTTPException(status_code=404, detail="client_not_found_or_not_owned")
+        raise
 
-    res = sb.table("jobs").insert(
-        {"user_id": user_id, **payload.model_dump()},
-        returning="representation",
-    ).execute()
-    if res.data and len(res.data) == 1:
+    try:
+        res = sb.table("jobs").insert({**payload.model_dump(), "user_id": user_id}).execute()
         return res.data[0]
+    except APIError as e:
+        raise HTTPException(status_code=403, detail=getattr(e, "message", str(e)))
     raise HTTPException(status_code=500, detail="Insert failed")
