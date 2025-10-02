@@ -4,3 +4,4 @@ python-dotenv
 httpx
 pyjwt
 cryptography
+supabase>=2.6.0
