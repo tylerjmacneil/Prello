@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import jwt
 from jwt import PyJWKClient
+from app.routers import clients
 
 load_dotenv()
 
@@ -14,6 +15,7 @@ SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")  # <-- NEW
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 
 app = FastAPI(title="Prello API", version="0.1.0")
+app.include_router(clients.router)
 
 if CORS_ORIGINS:
     app.add_middleware(
