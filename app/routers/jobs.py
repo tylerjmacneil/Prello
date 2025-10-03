@@ -94,6 +94,110 @@ def delete_job(job_id: str, user=Depends(get_current_user)):
         .execute()
     )
     return {"ok": True}
+
+# Stripe payment link endpoint
+import stripe
+
+@router.post("/{job_id}/payment-link")
+def create_payment_link(job_id: str, user=Depends(get_current_user)):
+    # 1) Fetch the job (and ensure ownership)
+    job_resp = (
+        supabase.table("jobs")
+        .select("*")
+        .eq("id", job_id)
+        .eq("owner_user_id", user["id"])
+        .execute()
+    )
+    if not job_resp.data:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job = job_resp.data[0]
+
+    # If we already created a link, return it (idempotent)
+    if job.get("stripe_payment_link_url"):
+        return {
+            "job_id": job_id,
+            "payment_link_url": job["stripe_payment_link_url"],
+            "payment_link_id": job.get("stripe_payment_link_id"),
+            "price_id": job.get("stripe_price_id"),
+            "product_id": job.get("stripe_product_id"),
+            "existing": True,
+        }
+
+    # 2) Init Stripe
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    if not stripe.api_key:
+        raise HTTPException(status_code=500, detail="Missing STRIPE_SECRET_KEY")
+
+    # 3) Create Product + Price for this job (USD cents)
+    product = stripe.Product.create(
+        name=f"Job: {job.get('title','Untitled')}",
+        metadata={
+            "job_id": job_id,
+            "owner_user_id": user["id"],
+            "bnpl_enabled": str(job.get("bnpl_enabled", False)),
+            "pass_fees": str(job.get("pass_fees", False)),
+        },
+    )
+
+    price = stripe.Price.create(
+        unit_amount=int(job["price_cents"]),
+        currency="usd",
+        product=product.id,
+    )
+
+    # 4) Create a Payment Link
+    pm_types = ["card"]
+    if job.get("bnpl_enabled"):
+        pm_types += ["klarna", "afterpay_clearpay"]
+
+    try:
+        payment_link = stripe.PaymentLink.create(
+            line_items=[{"price": price.id, "quantity": 1}],
+            payment_method_types=pm_types,
+            metadata={
+                "job_id": job_id,
+                "owner_user_id": user["id"],
+                "bnpl_enabled": str(job.get("bnpl_enabled", False)),
+                "pass_fees": str(job.get("pass_fees", False)),
+            },
+            after_completion={
+                "type": "redirect",
+                "redirect": {"url": "https://prello.app/thanks"}
+            },
+        )
+    except Exception:
+        payment_link = stripe.PaymentLink.create(
+            line_items=[{"price": price.id, "quantity": 1}],
+            metadata={
+                "job_id": job_id,
+                "owner_user_id": user["id"],
+                "bnpl_enabled": str(job.get("bnpl_enabled", False)),
+                "pass_fees": str(job.get("pass_fees", False)),
+            },
+            after_completion={
+                "type": "redirect",
+                "redirect": {"url": "https://prello.app/thanks"}
+            },
+        )
+
+    # 5) Save the Stripe IDs/URL back on the job
+    supabase.table("jobs").update({
+        "stripe_product_id": product.id,
+        "stripe_price_id": price.id,
+        "stripe_payment_link_id": payment_link.id,
+        "stripe_payment_link_url": payment_link.url,
+        "status": job.get("status") or "sent"
+    }).eq("id", job_id).eq("owner_user_id", user["id"]).execute()
+
+    return {
+        "job_id": job_id,
+        "payment_link_url": payment_link.url,
+        "payment_link_id": payment_link.id,
+        "price_id": price.id,
+        "product_id": product.id,
+        "existing": False,
+    }
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import create_client
 import os
