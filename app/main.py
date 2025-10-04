@@ -1,3 +1,4 @@
+from app.routers import jobs
 from fastapi import FastAPI
 from app.routers import clients, jobs
 
