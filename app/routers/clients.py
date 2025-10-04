@@ -12,7 +12,7 @@ supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_
 
 class ClientCreate(BaseModel):
     name: str
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None  # relaxed to plain string for dev
     phone: Optional[str] = None
 
 @router.get("/")
@@ -24,7 +24,11 @@ def list_clients(user=Depends(get_current_user)):
 def create_client_route(client: ClientCreate, user=Depends(get_current_user)):
     data = client.model_dump()
     data["owner_user_id"] = user["id"]
-    resp = supabase.table("clients").insert(data).execute()
+    try:
+        resp = supabase.table("clients").insert(data).execute()
+    except Exception as e:
+        # Surface DB error during dev so you know exactly what's wrong
+        raise HTTPException(status_code=400, detail=f"Insert failed: {e}")
     if not resp.data:
         raise HTTPException(status_code=400, detail="Failed to create client")
     return resp.data[0]
