@@ -24,6 +24,7 @@ class JobCreate(BaseModel):
 
 
 
+
 # --- Stripe payment link endpoint ---
 from fastapi import HTTPException  # ok if already imported
 
