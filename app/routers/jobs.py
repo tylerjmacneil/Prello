@@ -23,14 +23,15 @@ class JobCreate(BaseModel):
 
 
 
-# --- Stripe payment link endpoint (user-requested version) ---
+
+# --- Stripe payment link endpoint ---
 from fastapi import HTTPException  # ok if already imported
 
 @router.post("/{job_id}/payment-link")
 def create_payment_link(job_id: str, user=Depends(get_current_user)):
     import os, stripe
 
-    # 1) Fetch job for this user
+    # Fetch the job scoped to the current user
     job_resp = (
         supabase.table("jobs")
         .select("*").eq("id", job_id).eq("owner_user_id", user["id"])
@@ -40,7 +41,7 @@ def create_payment_link(job_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Job not found")
     job = job_resp.data
 
-    # Idempotency: return existing link if already created
+    # Idempotent: return existing link if already created
     if job.get("stripe_payment_link_url"):
         return {
             "job_id": job_id,
@@ -51,23 +52,23 @@ def create_payment_link(job_id: str, user=Depends(get_current_user)):
             "existing": True,
         }
 
-    # 2) Stripe init
+    # Stripe init
     stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Missing STRIPE_SECRET_KEY")
 
-    # 3) Create Product + Price
+    # Create Product + Price
     product = stripe.Product.create(
         name=f"Job: {job.get('title','Untitled')}",
-        metadata={"job_id": job_id, "owner_user_id": user["id"]}
+        metadata={"job_id": job_id, "owner_user_id": user["id"]},
     )
     price = stripe.Price.create(
         unit_amount=int(job["price_cents"]),
         currency="usd",
-        product=product.id
+        product=product.id,
     )
 
-    # 4) Payment Link (try BNPL; fall back to card-only)
+    # Try BNPL; fall back to card-only if account disallows
     pm_types = ["card"]
     if job.get("bnpl_enabled"):
         pm_types += ["klarna", "afterpay_clearpay"]
@@ -85,7 +86,7 @@ def create_payment_link(job_id: str, user=Depends(get_current_user)):
             after_completion={"type": "redirect", "redirect": {"url": "https://prello.app/thanks"}},
         )
 
-    # 5) Save back to Supabase
+    # Save details on the job
     supabase.table("jobs").update({
         "stripe_product_id": product.id,
         "stripe_price_id": price.id,
