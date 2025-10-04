@@ -22,6 +22,7 @@ class JobCreate(BaseModel):
     status: Optional[str] = "draft"  # 'draft'|'sent'|'signed'|'paid'|'cancelled'
 
 
+
 # --- Stripe payment link endpoint (user-requested version) ---
 from fastapi import HTTPException  # ok if already imported
 
