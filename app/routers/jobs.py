@@ -11,6 +11,7 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_KEY"))
 
 # --- Request models ---
+
 class JobCreate(BaseModel):
     client_id: str
     title: str
@@ -20,90 +21,16 @@ class JobCreate(BaseModel):
     pass_fees: bool = False
     status: Optional[str] = "draft"  # 'draft'|'sent'|'signed'|'paid'|'cancelled'
 
-class JobUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    price_cents: Optional[int] = None
-    bnpl_enabled: Optional[bool] = None
-    pass_fees: Optional[bool] = None
-    status: Optional[str] = None
-
-# --- Endpoints ---
-@router.get("/")
-def list_jobs(user=Depends(get_current_user)):
-    resp = (
-        supabase.table("jobs")
-        .select("*")
-        .eq("owner_user_id", user["id"])
-        .order("created_at", desc=True)
-        .execute()
-    )
-    return resp.data
-
-@router.post("/")
-def create_job(payload: JobCreate, user=Depends(get_current_user)):
-    if payload.price_cents is None or int(payload.price_cents) < 0:
-        raise HTTPException(status_code=422, detail="price_cents must be >= 0")
-
-    job = payload.model_dump()
-    job["owner_user_id"] = user["id"]
-    job.setdefault("status", "draft")
-
-    try:
-        resp = supabase.table("jobs").insert(job).execute()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Insert failed: {e}")
-
-    if not resp.data:
-        raise HTTPException(status_code=400, detail="Failed to create job")
-    return resp.data[0]
-
-@router.get("/{job_id}")
-def get_job(job_id: str, user=Depends(get_current_user)):
-    resp = (
-        supabase.table("jobs")
-        .select("*")
-        .eq("id", job_id)
-        .eq("owner_user_id", user["id"])
-        .execute()
-    )
-    if not resp.data:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return resp.data[0]
-
-@router.patch("/{job_id}")
-def update_job(job_id: str, update: JobUpdate, user=Depends(get_current_user)):
-    data = {k: v for k, v in update.model_dump().items() if v is not None}
-    if not data:
-        raise HTTPException(status_code=422, detail="No fields to update")
-
-    resp = (
-        supabase.table("jobs")
-        .update(data)
-        .eq("id", job_id)
-        .eq("owner_user_id", user["id"])
-        .execute()
-    )
-    if not resp.data:
-        raise HTTPException(status_code=404, detail="Job not found or no changes")
-    return resp.data[0]
-
-@router.delete("/{job_id}")
-def delete_job(job_id: str, user=Depends(get_current_user)):
-    (
-        supabase.table("jobs")
-        .delete()
-        .eq("id", job_id)
-        .eq("owner_user_id", user["id"])
-        .execute()
-    )
-
-# Stripe payment link endpoint (streamlined, using .single())
-import os, stripe
-from fastapi import HTTPException
+# --- Stripe payment link endpoint (user-requested version) ---
+from fastapi import HTTPException  # ok if already imported
 
 @router.post("/{job_id}/payment-link")
 def create_payment_link(job_id: str, user=Depends(get_current_user)):
+
+    # local imports to avoid top-level duplicates
+    import os
+    import stripe
+
     # 1) Fetch job for this user
     job_resp = (
         supabase.table("jobs")
@@ -114,7 +41,7 @@ def create_payment_link(job_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Job not found")
     job = job_resp.data
 
-    # Return existing link if already created (idempotent)
+    # Idempotency: return existing link if already created
     if job.get("stripe_payment_link_url"):
         return {
             "job_id": job_id,
@@ -130,7 +57,7 @@ def create_payment_link(job_id: str, user=Depends(get_current_user)):
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Missing STRIPE_SECRET_KEY")
 
-    # 3) Product + Price
+    # 3) Create Product + Price
     product = stripe.Product.create(
         name=f"Job: {job.get('title','Untitled')}",
         metadata={"job_id": job_id, "owner_user_id": user["id"]}
@@ -141,99 +68,25 @@ def create_payment_link(job_id: str, user=Depends(get_current_user)):
         product=product.id
     )
 
-    # 4) Payment Link (try BNPL; fallback to default card if account disallows)
+    # 4) Payment Link (try BNPL; fall back to card-only)
     pm_types = ["card"]
     if job.get("bnpl_enabled"):
         pm_types += ["klarna", "afterpay_clearpay"]
-
     try:
         link = stripe.PaymentLink.create(
             line_items=[{"price": price.id, "quantity": 1}],
             payment_method_types=pm_types,
             metadata={"job_id": job_id, "owner_user_id": user["id"]},
-            after_completion={"type": "redirect", "redirect": {"url": "https://prello.app/thanks"}}
+            after_completion={"type": "redirect", "redirect": {"url": "https://prello.app/thanks"}},
         )
     except Exception:
         link = stripe.PaymentLink.create(
             line_items=[{"price": price.id, "quantity": 1}],
             metadata={"job_id": job_id, "owner_user_id": user["id"]},
-            after_completion={"type": "redirect", "redirect": {"url": "https://prello.app/thanks"}}
+            after_completion={"type": "redirect", "redirect": {"url": "https://prello.app/thanks"}},
         )
 
     # 5) Save back to Supabase
-    supabase.table("jobs").update({
-        "stripe_product_id": product.id,
-        "stripe_price_id": price.id,
-        "stripe_payment_link_id": link.id,
-        "stripe_payment_link_url": link.url,
-        "status": job.get("status") or "sent",
-    }).eq("id", job_id).eq("owner_user_id", user["id"]).execute()
-
-
-# Local import version of Stripe payment link endpoint
-from fastapi import HTTPException  # safe if already imported
-
-@router.post("/{job_id}/payment-link")
-def create_payment_link(job_id: str, user=Depends(get_current_user)):
-    # local imports to avoid duplicate top-level imports
-    import os, stripe
-
-    # 1) Fetch job (scoped to current user)
-    job_resp = (
-        supabase.table("jobs")
-        .select("*").eq("id", job_id).eq("owner_user_id", user["id"])
-        .single().execute()
-    )
-    if not job_resp.data:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = job_resp.data
-
-    # Idempotent: return existing link
-    if job.get("stripe_payment_link_url"):
-        return {
-            "job_id": job_id,
-            "payment_link_url": job["stripe_payment_link_url"],
-            "payment_link_id": job.get("stripe_payment_link_id"),
-            "price_id": job.get("stripe_price_id"),
-            "product_id": job.get("stripe_product_id"),
-            "existing": True,
-        }
-
-    # 2) Stripe init
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-    if not stripe.api_key:
-        raise HTTPException(status_code=500, detail="Missing STRIPE_SECRET_KEY")
-
-    # 3) Product + Price
-    product = stripe.Product.create(
-        name=f"Job: {job.get('title','Untitled')}",
-        metadata={"job_id": job_id, "owner_user_id": user["id"]}
-    )
-    price = stripe.Price.create(
-        unit_amount=int(job["price_cents"]),
-        currency="usd",
-        product=product.id
-    )
-
-    # 4) Payment Link (try BNPL; fallback to card-only)
-    pm_types = ["card"]
-    if job.get("bnpl_enabled"):
-        pm_types += ["klarna", "afterpay_clearpay"]
-    try:
-        link = stripe.PaymentLink.create(
-            line_items=[{"price": price.id, "quantity": 1}],
-            payment_method_types=pm_types,
-            metadata={"job_id": job_id, "owner_user_id": user["id"]},
-            after_completion={"type": "redirect", "redirect": {"url": "https://prello.app/thanks"}},
-        )
-    except Exception:
-        link = stripe.PaymentLink.create(
-            line_items=[{"price": price.id, "quantity": 1}],
-            metadata={"job_id": job_id, "owner_user_id": user["id"]},
-            after_completion={"type": "redirect", "redirect": {"url": "https://prello.app/thanks"}},
-        )
-
-    # 5) Save on the job
     supabase.table("jobs").update({
         "stripe_product_id": product.id,
         "stripe_price_id": price.id,
@@ -252,7 +105,6 @@ def create_payment_link(job_id: str, user=Depends(get_current_user)):
     }
 
 # Stripe payment link endpoint
-import stripe
 
 @router.post("/{job_id}/payment-link")
 def create_payment_link(job_id: str, user=Depends(get_current_user)):
