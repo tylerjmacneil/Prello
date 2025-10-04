@@ -42,14 +42,18 @@ def list_jobs(user=Depends(get_current_user)):
 
 @router.post("/")
 def create_job(payload: JobCreate, user=Depends(get_current_user)):
-    if payload.price_cents < 0:
+    if payload.price_cents is None or int(payload.price_cents) < 0:
         raise HTTPException(status_code=422, detail="price_cents must be >= 0")
 
     job = payload.model_dump()
     job["owner_user_id"] = user["id"]
     job.setdefault("status", "draft")
 
-    resp = supabase.table("jobs").insert(job).execute()
+    try:
+        resp = supabase.table("jobs").insert(job).execute()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Insert failed: {e}")
+
     if not resp.data:
         raise HTTPException(status_code=400, detail="Failed to create job")
     return resp.data[0]
