@@ -22,12 +22,7 @@ class JobCreate(BaseModel):
     status: Optional[str] = "draft"  # 'draft'|'sent'|'signed'|'paid'|'cancelled'
 
 
-
-
-
 # --- Stripe payment link endpoint ---
-from fastapi import HTTPException  # ok if already imported
-
 @router.post("/{job_id}/payment-link")
 def create_payment_link(job_id: str, user=Depends(get_current_user)):
     import os, stripe
